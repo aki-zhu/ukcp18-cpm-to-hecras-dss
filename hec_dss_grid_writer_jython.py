@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""HEC-DSSVue Jython 格网写入器。
-HEC-DSSVue Jython grid writer.
+"""HEC-DSSVue Jython grid writer.
 """
 
 from hec.heclib.dss import HecDss
