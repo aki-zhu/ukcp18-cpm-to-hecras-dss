@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""将 UKCP18 CPM 360_day 降雨 NetCDF 转为 HEC-RAS DSS。
-Convert UKCP18 CPM 360_day rainfall NetCDF files to HEC-RAS DSS grids.
+"""Convert UKCP18 CPM 360_day rainfall NetCDF files to HEC-RAS DSS grids.
 """
 
 from __future__ import annotations
