@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-"""按区域裁剪 UKCP18 CPM 5 km 降雨 NetCDF。
-Clip UKCP18 CPM 5 km rainfall NetCDF files to regional boundaries.
+"""Clip UKCP18 CPM 5 km rainfall NetCDF files to regional boundaries.
 """
 
-# 路径配置：将 PATH_TO_... 替换为本机数据路径。
 # Path configuration: replace PATH_TO_... with local data paths.
 import xarray as xr
 import geopandas as gpd
