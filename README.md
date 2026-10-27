@@ -1,154 +1,183 @@
 # UKCP18 CPM to HEC-RAS DSS
 
-Configurable date ranges, multiple time windows, daily/hourly rainfall and
-metadata-driven grid resolution. Sources are read-only. DSS grids use MM,
-PER-CUM and explicit accumulation bounds.
+Convert UKCP18 Convection-Permitting Model (CPM) precipitation NetCDF files
+into gridded HEC-DSS rainfall inputs for HEC-RAS rain-on-grid models.
 
-中文使用说明：[README_zh.md](README_zh.md)。
+The workflow selects a time period, optionally clips to a polygon boundary,
+handles grid coordinates, rainfall units and the `360_day` calendar, and writes precipitation in
+millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-only.
+
+## Requirements
+
+- 64-bit Python 3.11-3.13 on Windows or Linux and the packages in `requirements.txt`.
+- UKCP18 CPM precipitation NetCDF files containing `pr` and spatial coordinates.
+- An optional polygon shapefile for regional clipping.
+
+DSS files are written directly with `pydsstools`. HEC-DSSVue is optional for
+viewing the results; conversion runs entirely in Python.
 
 ## Quick start
 
-```bash
-python 02_ukcp18_cpm_to_hecras_dss.py --input-dir "D:/climate/cpm" --inspect
-python 02_ukcp18_cpm_to_hecras_dss.py --input-dir "D:/climate/cpm" --output-dir "D:/output/cpm" --start 2020-02-03 --end 2020-02-07 --prepare-only
-python 02_ukcp18_cpm_to_hecras_dss.py --config config.example.json
+1. Open a terminal in the repository folder and install the dependencies:
+
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+2. Save the following as `config.json` in that folder and replace the data,
+   output and boundary paths. This example selects daily 5 km
+   files from ensemble member `01`; adjust `input_pattern` for your files.
+
+   ```json
+   {
+     "input_dir": "D:/climate/ukcp18-cpm",
+     "input_pattern": "pr_rcp85_land-cpm_uk_5km_01_day_*.nc",
+     "output_dir": "D:/hec-ras/precipitation",
+     "boundary": "D:/boundaries/forth.shp",
+     "name": "forth",
+     "window": [["event", "2020-02-03", "2020-02-07"]]
+   }
+   ```
+
+   Use one dataset and ensemble member per run. Relative paths are resolved
+   from the configuration file's location. For native rotated grids, add the
+   target settings in the resolution table below.
+
+3. Inspect the input, then run the conversion:
+
+   ```bash
+   python ukcp18_cpm_to_hecras_dss.py --config config.json --inspect
+   python ukcp18_cpm_to_hecras_dss.py --config config.json
+   ```
+
+   The first command prints metadata. The second writes one `.dss` file per
+   time window to `output_dir`. Use a separate output folder for each dataset
+   or ensemble member.
+
+To run the same conversion from Python:
+
+```python
+from ukcp18_cpm_to_hecras_dss import main
+
+main(["--config", "config.json"])
 ```
 
-For actual DSS output remove `--prepare-only` and supply `--jython-exe` and
-`--template-dss`. The example configuration starts in preparation-only mode.
+In the supplied Notebook, set `CONFIG_PATH = Path("config.json").resolve()`
+and `RUN = True`. Keep `INSPECT_ONLY = True` to inspect, then set it to
+`False` to convert.
 
-## Native 2.2 km CPM and optional regional NetCDF
+DSS is the default output. Use `--output-format netcdf` for reusable Gregorian
+NetCDF rainfall, or `--prepare-only` for intermediate rainfall
+data without writing DSS.
 
-```bash
-python 02_ukcp18_cpm_to_hecras_dss.py --input-dir "D:/climate/cpm_2.2km" --output-dir "D:/output/cpm" --boundary "D:/boundaries/forth.shp" --name forth --target-crs EPSG:27700 --target-cell-size 2200 --start 2020-02-01 --end 2020-02-29 --prepare-only
-python 02_ukcp18_cpm_to_hecras_dss.py --input-dir "D:/climate/cpm" --output-dir "D:/output/windows" --window event 2020-02-03 2020-02-10 --window future 2040-05-01 2040-05-20 --prepare-only
-```
+## Boundary selection (optional)
 
-Gregorian inputs retain their dates. `360_day` data are converted month by
-month: interpolate 30 days to the Gregorian month length, then scale each
-output cell to preserve its monthly rainfall total. For hourly data, remap
-each hour-of-day independently, preserving its monthly amount and diurnal
-phase. This changes event chronology; it is not a physical date-equivalence
-mapping. Complete source months are required even for a partial output month.
-
-The original default DSS windows are 2019-11-01..2039-12-31,
-2039-11-01..2059-12-31, and 2059-11-01..2080-11-30.
-
-The optional `01_clip_ukcp18_cpm_regions.py` now uses the same preparation
-engine and exports **Gregorian interval accumulation in mm** as CF NetCDF,
-including CRS and time bounds. Without date options it exports one full-coverage
-file per region. This replaces the old hardcoded `pr_<region>_2010_2080.nc`
-clipping stage. Conversion from `360_day` occurs here once; stage 2 detects
-the Gregorian output and does not convert it again. Use `--boundary` or
-`--boundary-dir`; rotated inputs also need the explicit target grid.
-When deliberately exporting overlapping NC windows, select one window's files
-per DSS run to avoid duplicate source records.
-
-## Setup
-
-Python 3.11 or newer:
+Set `boundary` to any polygon shapefile and `name` to the output label.
+The example uses the broad Forth region from the UK river-basin regions
+dataset. Replace it with a catchment or model-domain boundary as needed:
 
 ```bash
-python -m pip install -r requirements.txt
+python ukcp18_cpm_to_hecras_dss.py --config config.json --boundary "D:/boundaries/my_catchment.shp" --name my_catchment
 ```
 
-Writing DSS additionally requires HEC-DSSVue 3.4.x `Jython.exe` and a template
-DSS with a precipitation GridContainer. A complete bundled example can serve
-as the template. Python preparation and tests do not require HEC-DSSVue.
+To browse for a shapefile, use `--choose-boundary`, or set `choose_boundary`
+to `true` in the JSON configuration. This requires
+a local desktop with Tkinter. Keep the `.shp`, `.shx`, `.dbf` and `.prj`
+files together; boundary coordinates are transformed to the output grid CRS.
 
-## Time selection
+For full-grid output, set `boundary` to `null`, keep `choose_boundary`
+`false` and leave `boundary_dir` unset.
 
-Supply `--start YYYY-MM-DD --end YYYY-MM-DD` for any inclusive date range.
-The output record on the last day ends the following day. For hourly/subdaily
-data, datetime bounds are **start-inclusive, end-exclusive**, for example
-`--start 2020-01-02T03:00 --end 2020-01-02T09:00` writes six hourly records.
-Datetime endpoints must align with the source accumulation intervals.
+## Time windows
 
-Use repeated `--window ID START END` to write independent DSS files, including
-overlapping windows. IDs must be unique. With no dates supplied, the original
-conversion windows remain the defaults; `--windows 01 02` filters their IDs.
-Dates and output names have no fixed year range or `20y` assumption.
-
-## Grids, units and validation
-
-- Detect spatial axes, CF `grid_mapping`, units, time bounds, calendar and native
-  interval from metadata. Process different products/ensembles in separate runs.
-- Native regular projected square grids in metres retain their resolution
-  automatically, including 1, 2.2, 5, 12 or 25 km. Descending axes are reversed
-  together with the data. Fractional grid origins are preserved.
-- For geographic/rotated or stretched grids, explicitly specify a projected
-  `--target-crs` and `--target-cell-size` in metres. Reprojection transforms
-  values as well as coordinates. Native CPM stretched halo cells use GDAL
-  geolocation metadata with pixel-centre registration, rather than a false affine.
-- Resampling: `average` (default), `nearest`, or `bilinear`. Area averaging
-  is a practical depth resampling method; it is not an exact spherical
-  conservative-remapping guarantee. Spatial resampling changes local values.
-- Amounts in `mm`, `m` or `kg m-2` and rates such as `mm/day`, `mm h-1` and
-  `kg m-2 s-1` are converted to **MM per native accumulation interval**.
-  Hourly rainfall is kept hourly; no automatic daily disaggregation is invented.
-- Multi-member dimensions require `--select ensemble_member=VALUE`; singleton
-  dimensions are removed and their values are checked across source files.
-- Missing/nonfinite rainfall becomes zero by default, preserving the previous
-  workflows. Set `--missing-data error` for strict rejection. Negative rainfall
-  is rejected. Out-of-boundary cells are zero; `--buffer-cells` controls padding.
-- Regional-mean products without two spatial axes cannot be used as spatial
-  rainfall grids. Curvilinear/unstructured meshes are not supported.
-- Missing source coverage, overlaps, changing grids/units/calendars, unknown
-  CRS, and monthly/seasonal mean inputs fail clearly. No zero-filled time gaps.
-  Old clipped NC files without CRS require a verified `--source-crs EPSG:27700`.
-- If time bounds are absent, explicitly provide `--time-label start|centre|end`;
-  a single-record file also needs `--interval-hours`.
-
-## Regions and large inputs
-
-Use `--boundary path/to/region.shp --name forth` for one polygon, or
-`--boundary-dir path/to/region_folders --regions forth tay` for the original
-17-region layout. Without either option, the input grid is used directly;
-recognized regional `pr_<slug>_*.nc` files are grouped separately, independent
-of their date suffix. A missing boundary CRS requires `--boundary-crs`.
-
-Files are indexed by their time coordinates, sorted chronologically, and opened
-read-only. Only one rainfall source file is cached. Preparation reads spatial
-crops and `--chunk-records` (default 24); calendar conversion works on one
-30-day subdaily slot at a time and uses a disk-backed output month. Reserve
-temporary space for a month plus the requested binary payloads.
-
-`--inspect` prints metadata without writing files. `--prepare-only` builds the
-binary payloads, interval CSVs and metadata JSON without HEC-DSSVue. Payloads
-are retained for audit/retry. Existing DSS files require explicit `--overwrite`.
-The writer builds a separate temporary DSS, validates every record's catalog,
-dimensions, offsets, origin, cell size, WKT, units and accumulation bounds,
-and first/last arrays, then replaces the destination. A failed write preserves
-the previous DSS. The template may round rainfall by approximately 0.01 mm.
-
-## JSON and Notebook
-
-Copy `config.example.json`, edit the input/output paths and windows, then run
-the entry script with `--config your_config.json`. Relative paths in JSON are
-resolved relative to that JSON file. CLI settings override JSON settings.
-
-The notebooks call the same `dss_pipeline.py` as the command-line scripts.
-Edit their CONFIG cell, inspect metadata, and set `RUN = True` to execute.
-`PREPARE_ONLY = True` is the initial setting; turn it off and provide the
-HEC-DSSVue executable/template to produce DSS.
-
-## Tests
+Each `window` entry is `[ID, START, END]`. Add entries for separate output files,
+or use `--windows ID` to select one. To replace the configured periods for one run:
 
 ```bash
-python -m unittest discover -s tests -v
+python ukcp18_cpm_to_hecras_dss.py --config config.json --window event 2020-02-03 2020-02-07
 ```
 
-Tests create small synthetic CF files and check dates, hourly intervals,
-360-day monthly amounts, leap days, units, metadata, grid direction, regional
-grouping, polygon edges, stretched/rotated grids and NetCDF round trips.
-CI runs the same suite on Windows and Linux. HEC-DSSVue integration needs
-a local installation and is recorded separately in `VALIDATION.md`.
+Date-only ends include the whole day; datetime ends are exclusive and must align
+with the input interval. Daily and hourly inputs retain their interval.
+`360_day` conversion needs complete source months and preserves monthly totals
+while changing event timing and intensities. Monthly and seasonal means are unsupported.
 
-## Complete DSS output examples
+## Spatial resolution and grid handling
 
-`examples/output_dss/` contains only complete, previously generated **Forth**
-DSS files, copied byte-for-byte from the supplied local output directories.
-These are original workflow outputs, not regenerated with the new code.
-All original time windows are included. See `examples/README.md` for sizes,
-dates, record counts and SHA-256 digests. No large NC inputs, model HDFs,
-boundary data, logs or temporary payloads are bundled.
+Grid handling follows the spatial coordinates, coordinate units and CF CRS
+metadata. The target projection and cell size control any reprojection.
+
+| Input grid | Handling | Target settings |
+|---|---|---|
+| Regular projected 5 km grid, such as British National Grid | Retains its CRS and 5000 m cells by default. | No override needed. |
+| Regular projected 2.2 km grid | Retains its CRS and 2200 m cells by default. | No override needed. |
+| Native 2.2 km rotated grid | Reprojects to a regular projected grid. Regular axes use an affine transform; stretched axes use their actual cell-centre coordinates. | Set `target_crs` and `target_cell_size`, e.g. `EPSG:27700` and `2200`. Use `5000` for a 5 km output grid. |
+| Other regular projected square grids in metres | Infers cell spacing from the coordinates and retains the grid by default. | Override both settings to change the output grid. |
+| Geographic or other rotated grids | Require a projected output grid with square cells in metres. | Set `target_crs` and `target_cell_size` explicitly. |
+| Regional averages or curvilinear meshes without two 1-D spatial axes | Unsupported as gridded rainfall inputs. | Use a supported spatial grid. |
+
+For example, to reproject native CPM data to 2200 m British National Grid cells:
+
+```bash
+python ukcp18_cpm_to_hecras_dss.py --config config.json --target-crs EPSG:27700 --target-cell-size 2200
+```
+
+Resampling defaults to `average` at every resolution; `--resampling nearest` or
+`--resampling bilinear` selects another method. An output cell size sets the
+target grid spacing; it does not increase the detail in the source rainfall.
+If CRS metadata is absent, supply a verified `--source-crs`.
+Missing rainfall is zero by default; use `--missing-data error` for strict handling.
+
+## Use the DSS rainfall in HEC-RAS
+
+After conversion, the DSS file contains a time series of precipitation grids
+that can be assigned to a HEC-RAS rain-on-grid model.
+
+1. Open **Unsteady Flow Analysis**, select the intended **Plan**, and set its
+   **Simulation Time Window** to the required start and end dates and times.
+2. Open **Unsteady Flow Data** and select **Meteorological Data**. Set
+   **Precipitation/Evapotranspiration** to **Enable** if needed. Under
+   **Precipitation**, select **Gridded** as the **Mode** and **DSS** as the
+   **Source**.
+3. In **DSS Data**, use the open-file button to select the converted `.dss`
+   file. In the **DSS Viewer**, double-click the first timestep of the intended
+   **PRECIPITATION** grid series.
+4. Set **Time Window** to **Plan Time**. If an **Apply** button is shown,
+   apply the time-window setting, then confirm the selection with **OK**.
+   This displays the data for the active Plan's time window. The selected
+   record identifies the rainfall grid series used by the model.
+5. Save the unsteady flow data and ensure that the active Plan uses this
+   unsteady flow file. During computation, HEC-RAS reads the rainfall grids
+   corresponding to the Plan's simulation period.
+6. In **RAS Mapper**, display precipitation under **Event Conditions** to
+   inspect its location, coverage and variation over time. Incremental and
+   accumulated precipitation maps are available.
+7. Return to **Unsteady Flow Analysis**, save the Plan and click **Compute**
+   to run the model.
+
+**Time coverage:** The DSS accumulation intervals must continuously cover the
+entire Plan simulation window. The first interval must start at or before the
+Plan start, and the final interval must end at or after the Plan end. Choose a
+DSS output period that includes the complete simulation; **Plan Time** does
+not extend the rainfall data available in the file.
+
+See the official [Meteorological Data tutorial](https://www.hec.usace.army.mil/confluence/rasdocs/hgt/latest/tutorials/2d-unsteady-flow/meteorological-data),
+[gridded precipitation guidance](https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/6.6/boundary-and-initial-conditions-for-2d-flow-areas/global-boundary-conditions)
+and [DSS Viewer time-window documentation](https://www.hec.usace.army.mil/confluence/rasdocs/rasum/7.0/viewing-results/viewing-data-contained-in-an-hec-dss-file).
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `ukcp18_cpm_to_hecras_dss.py` | Shared converter and command-line entry point for DSS and NetCDF output. |
+| `ukcp18_cpm_to_hecras_dss.ipynb` | Notebook interface using the same converter and JSON configuration. |
+| `hec_dss_grid_writer.py` | Direct DSS-7 grid writing and readback with `pydsstools`. |
+| `config.example.json` | Paths, output format and three configurable periods. |
+| `examples/output_dss/` | Complete Forth DSS examples for all three periods. |
+
+NetCDF exports contain interval rainfall
+amounts in `mm`, a Gregorian time axis and CRS information. It can be used as
+input to the DSS conversion without repeating calendar conversion.
+
+See [examples](examples/README.md) for the complete output files, or run
+`python ukcp18_cpm_to_hecras_dss.py --help` for all options.

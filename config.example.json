@@ -1,8 +1,12 @@
 {
-  "input_dir": "D:/climate/cpm",
+  "input_dir": "D:/climate/ukcp18-cpm",
   "input_pattern": "pr*.nc",
-  "output_dir": "D:/output/cpm",
+  "output_dir": "D:/hec-ras/precipitation",
+  "output_format": "dss",
   "variable": "pr",
+  "boundary": "D:/boundaries/forth.shp",
+  "choose_boundary": false,
+  "name": "forth",
   "window": [
     [
       "01",
@@ -20,9 +24,5 @@
       "2080-11-30"
     ]
   ],
-  "prepare_only": true,
-  "buffer_cells": 1,
-  "chunk_records": 24,
-  "missing_data": "zero",
-  "resampling": "average"
+  "prepare_only": false
 }

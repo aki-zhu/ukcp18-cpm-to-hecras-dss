@@ -1,6 +1,6 @@
-"""Metadata-driven rainfall preparation. This module is shared by both repositories.
+"""Convert UKCP18 CPM precipitation to gridded HEC-DSS or CF NetCDF.
 
-Python 3 prepares portable payloads; HEC-DSSVue's Jython writes/reads DSS.
+Python prepares portable payloads and writes/reads DSS with pydsstools.
 Source files are always opened read-only. All spatial arrays use increasing x/y.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
+import sys
 import tempfile
 
 import numpy as np
@@ -39,13 +39,9 @@ REGIONS = [
     ("thames", "Region_Thames"), ("tweed", "Region_Tweed"),
     ("westernwales", "Region_WestWales"),
 ]
-DEFAULT_WINDOWS = {
-    "cpm": [("01", "2019-11-01", "2039-12-31"),
-            ("02", "2039-11-01", "2059-12-31"),
-            ("03", "2059-11-01", "2080-11-30")],
-    "haduk": [("01", "1979-11-01", "1999-12-31"),
-              ("02", "1999-11-01", "2019-12-31")],
-}
+DEFAULT_WINDOWS = [("01", "2019-11-01", "2039-12-31"),
+                   ("02", "2039-11-01", "2059-12-31"),
+                   ("03", "2059-11-01", "2080-11-30")]
 
 
 def safe_name(value):
@@ -77,12 +73,12 @@ class Window:
         return f"{self.name}_{self.start:%Y%m%dT%H%M}_{self.stop:%Y%m%dT%H%M}"
 
 
-def select_windows(args, kind):
+def select_windows(args):
     if args.window and (args.start or args.end):
         raise ValueError("Use either --start/--end or repeated --window ID START END.")
     if bool(args.start) != bool(args.end):
         raise ValueError("Supply both --start and --end.")
-    entries = args.window or ([("custom", args.start, args.end)] if args.start else DEFAULT_WINDOWS[kind])
+    entries = args.window or ([("custom", args.start, args.end)] if args.start else DEFAULT_WINDOWS)
     windows = [Window.parse(*entry) for entry in entries]
     if len({w.name for w in windows}) != len(windows):
         raise ValueError("Window IDs must be unique.")
@@ -279,7 +275,7 @@ def inspect_variable(ds, args):
     return da.transpose("time", ds[yn].dims[0], ds[xn].dims[0]), Grid(x, y, dx, dy, crs), selections
 
 
-def source_times(ds, args, kind):
+def source_times(ds, args):
     times = ds.time.values
     if len(times) == 0:
         raise ValueError("Empty source time coordinate.")
@@ -310,19 +306,13 @@ def source_times(ds, args, kind):
     if args.interval_hours and not np.isclose(step, args.interval_hours * 3600):
         raise ValueError("--interval-hours disagrees with CF time bounds.")
     policy = "cf_interval_bounds" if bounds is not None else "explicit_" + args.time_label
-    if kind == "haduk" and step == 86400:
-        # Preserve the original workflow's nominal daily labels from the downloaded files.
-        starts = [pd.Timestamp(t).normalize().to_datetime64() for t in times]
-        policy = "haduk_original_nominal_day_00_to_24"
-        if cal == "360_day":
-            raise ValueError("HadUK daily observations require a Gregorian calendar.")
     return [date_key(t) for t in starts], int(step), cal, policy
 
 
 class Catalog:
     """Index only metadata; load rainfall in small time/spatial blocks on demand."""
-    def __init__(self, paths, args, kind):
-        self.args, self.kind, self.paths = args, kind, list(paths)
+    def __init__(self, paths, args):
+        self.args, self.paths = args, list(paths)
         self.records, self.file_info = {}, []
         self.grid = None
         self.invalid_cells = 0
@@ -330,7 +320,7 @@ class Catalog:
         for path in paths:
             with xr.open_dataset(path, engine=args.engine, decode_times=True) as ds:
                 da, grid, selections = inspect_variable(ds, args)
-                keys, step, cal, policy = source_times(ds, args, kind)
+                keys, step, cal, policy = source_times(ds, args)
                 units = args.units or da.attrs.get("units", "")
                 scale = unit_scale(units, step)
                 signature = (step, cal, selections, str(units), policy)
@@ -342,12 +332,6 @@ class Catalog:
                                      "Process different products/ensembles in separate runs.")
                 if keys != sorted(keys) or len(keys) != len(set(keys)):
                     raise ValueError(f"Non-monotonic/duplicate time coordinates in {path.name}")
-                if kind == "haduk" and step == 86400:
-                    match = re.search(r"_(\d{8})-(\d{8})\.nc$", path.name)
-                    if match:
-                        expected = [date_key(t) for t in pd.date_range(*match.groups(), freq="D")]
-                        if keys != expected:
-                            raise ValueError(f"HadUK filename dates disagree with time coordinates: {path.name}")
                 for index, key in enumerate(keys):
                     if key in self.records:
                         raise ValueError(f"Overlapping source records at {key}; narrow --input-pattern or --select.")
@@ -407,6 +391,36 @@ def dilate_mask(mask, cells):
         result = np.logical_or.reduce([padded[r:r+mask.shape[0], c:c+mask.shape[1]]
                                        for r in range(3) for c in range(3)])
     return result
+
+
+def choose_boundary_shapefile(initial_path=None):
+    """Choose a local polygon shapefile without making desktop support mandatory."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as error:
+        raise RuntimeError("The file chooser needs Tkinter. Set --boundary to a shapefile path instead.") from error
+    initial = Path(initial_path).expanduser() if initial_path else Path.cwd()
+    directory = initial if initial.is_dir() else initial.parent
+    options = dict(title="Select a clipping boundary shapefile", filetypes=[("Shapefiles", "*.shp")])
+    if directory.is_dir():
+        options["initialdir"] = str(directory.resolve())
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        selected = filedialog.askopenfilename(parent=root, **options)
+    except tk.TclError as error:
+        raise RuntimeError("The file chooser needs a desktop session. Set --boundary to a shapefile path instead.") from error
+    finally:
+        if root is not None:
+            root.destroy()
+    if not selected:
+        return None
+    path = Path(selected).expanduser().resolve()
+    if path.suffix.lower() != ".shp" or not path.is_file():
+        raise ValueError("Select an existing .shp boundary file.")
+    return str(path)
 
 
 def load_polygons(path, crs, boundary_crs=None):
@@ -655,7 +669,6 @@ def prepare(catalog, plan, window, args, name, boundary=None):
         raise ValueError("Payload record/byte count mismatch.")
     meta = dict(**grid_meta, values_bin=(payload / "values.bin").as_posix(),
                 dates_csv=(payload / "dates.csv").as_posix(), out_dss=destination.as_posix(),
-                template_dss=Path(args.template_dss).resolve().as_posix() if args.template_dss else "",
                 a_part="", b_part="", c_part="PRECIPITATION", f_part="",
                 data_units="MM", record_count=count, interval_seconds=catalog.step,
                 start=window.start.isoformat(), end_exclusive=window.stop.isoformat(),
@@ -675,45 +688,31 @@ def prepare(catalog, plan, window, args, name, boundary=None):
 def run_writer(meta_paths, args):
     if args.prepare_only:
         return
-    if not args.jython_exe or not args.template_dss:
-        raise ValueError("DSS writing requires --jython-exe and --template-dss; use --prepare-only to inspect payloads.")
-    for path in (args.jython_exe, args.template_dss):
-        if not Path(path).is_file():
-            raise FileNotFoundError(path)
-    script = Path(__file__).with_name("hec_dss_grid_writer_jython.py")
-    out = Path(args.output_dir).resolve()
-    manifest = out / "dss_jobs_manifest.json"
-    manifest.write_text(json.dumps(dict(meta_paths=[str(p) for p in meta_paths],
-                                        validation_csv=(out / "dss_validation.csv").as_posix()), indent=2), encoding="ascii")
-    with (out / "dss_write.log").open("w", encoding="utf-8") as log:
-        process = subprocess.Popen([str(Path(args.jython_exe).resolve()), "-here", str(script), str(manifest)],
-                                   cwd=str(Path(args.jython_exe).resolve().parent), stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, errors="replace")
-        for line in process.stdout:
-            print(line, end="", flush=True)
-            log.write(line)
-            log.flush()
-        if process.wait() != 0:
-            raise RuntimeError(f"HEC-DSS writer/readback validation failed; see {out / 'dss_write.log'}")
+    from hec_dss_grid_writer import write_one
+    for meta_path in meta_paths:
+        write_one(meta_path)
 
 
-def build_parser(kind):
-    parser = argparse.ArgumentParser(description="Convert metadata-described CPM/HadUK rainfall to HEC-RAS DSS.")
+def build_parser():
+    parser = argparse.ArgumentParser(description="Convert UKCP18 CPM rainfall to gridded HEC-DSS or CF NetCDF.")
     parser.add_argument("--config", help="JSON configuration; command-line options override its values")
     parser.add_argument("--input-dir")
-    parser.add_argument("--input-pattern", default="pr*.nc" if kind == "cpm" else "rainfall*.nc")
+    parser.add_argument("--input-pattern", default="pr*.nc")
     parser.add_argument("--output-dir")
-    parser.add_argument("--variable", default="pr" if kind == "cpm" else "rainfall")
+    parser.add_argument("--output-format", choices=["dss", "netcdf"], default="dss",
+                        help="Write DSS (default) or reusable Gregorian NetCDF rainfall")
+    parser.add_argument("--variable", default="pr")
     parser.add_argument("--engine", default=None, help="Optional xarray backend, e.g. netcdf4 or h5netcdf")
     parser.add_argument("--start")
     parser.add_argument("--end")
     parser.add_argument("--window", action="append", nargs=3, metavar=("ID", "START", "END"))
     parser.add_argument("--windows", nargs="+", help="Select IDs from configured/default windows")
     parser.add_argument("--regions", nargs="+", help="Region slugs; defaults to all with --boundary-dir")
-    parser.add_argument("--boundary-dir")
-    parser.add_argument("--boundary", help="One polygon file instead of the 17-region boundary directory")
+    parser.add_argument("--boundary-dir", help="Directory of named regional boundary folders")
+    parser.add_argument("--boundary", help="Polygon shapefile path for optional regional clipping")
+    parser.add_argument("--choose-boundary", action="store_true", help="Browse for a shapefile; overrides configured boundary paths")
     parser.add_argument("--boundary-crs", help="Only needed for boundary files with missing CRS")
-    parser.add_argument("--name", default=kind, help="Dataset/region name for a single ungrouped input")
+    parser.add_argument("--name", default="cpm", help="Dataset/region name for a single ungrouped input")
     parser.add_argument("--buffer-cells", type=int, default=1)
     parser.add_argument("--source-crs", help="Explicit source CRS when metadata is absent")
     parser.add_argument("--target-crs", help="Projected target CRS, e.g. EPSG:27700")
@@ -725,40 +724,54 @@ def build_parser(kind):
     parser.add_argument("--interval-hours", type=float, help="Interval when bounds/sufficient times are absent")
     parser.add_argument("--chunk-records", type=int, default=24)
     parser.add_argument("--missing-data", choices=["zero", "error"], default="zero")
-    parser.add_argument("--jython-exe")
-    parser.add_argument("--template-dss")
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--inspect", action="store_true", help="Read metadata and print coverage/grid; write nothing")
     parser.add_argument("--overwrite", action="store_true")
     return parser
 
 
-def parse_args(kind, argv=None):
-    parser = build_parser(kind)
+def parse_args(argv=None):
+    parser = build_parser()
+    explicit = list(argv) if argv is not None else sys.argv[1:]
+    explicit_flags = {value.split("=", 1)[0] for value in explicit if value.startswith("--")}
     preliminary, _ = parser.parse_known_args(argv)
     if preliminary.config:
         config_path = Path(preliminary.config).resolve()
         config = json.loads(config_path.read_text(encoding="utf-8"))
         known = {action.dest for action in parser._actions} - {"help", "config"}
-        if not isinstance(config, dict) or set(config) - known:
+        if not isinstance(config, dict):
+            raise ValueError("Configuration must be a JSON object.")
+        if set(config) - known:
             raise ValueError("Unknown configuration keys: " + str(set(config)-known))
-        for key in ("input_dir", "output_dir", "boundary_dir", "boundary", "jython_exe", "template_dss"):
+        for key in ("input_dir", "output_dir", "boundary_dir", "boundary"):
             if config.get(key):
                 path = Path(config[key])
                 config[key] = str(path if path.is_absolute() else config_path.parent / path)
-        import sys
-        explicit = list(argv) if argv is not None else sys.argv[1:]
         for key in ("window", "select"):
-            if "--" + key in explicit:
+            if "--" + key in explicit_flags:
                 config.pop(key, None)
+        for flag, other in (("--boundary", "boundary_dir"), ("--boundary-dir", "boundary")):
+            if flag in explicit_flags:
+                config.pop(other, None)
+                if "--choose-boundary" not in explicit_flags:
+                    config["choose_boundary"] = False
         parser.set_defaults(**config)
     args = parser.parse_args(argv)
+    if args.output_format not in {"dss", "netcdf"}:
+        parser.error("output-format must be dss or netcdf.")
     if not args.input_dir or (not args.output_dir and not args.inspect):
         parser.error("--input-dir and --output-dir are required (output is optional with --inspect).")
     if args.chunk_records < 1 or args.buffer_cells < 0:
         parser.error("chunk-records must be positive and buffer-cells must be non-negative.")
+    if args.choose_boundary:
+        selected = choose_boundary_shapefile(args.boundary or args.boundary_dir)
+        if selected is None:
+            parser.error("Boundary selection cancelled; no conversion was started.")
+        args.boundary, args.boundary_dir = selected, None
     if args.boundary and args.boundary_dir:
         parser.error("Use either --boundary or --boundary-dir.")
+    if args.boundary and not args.inspect and not Path(args.boundary).is_file():
+        parser.error("Boundary shapefile not found: " + str(args.boundary))
     if args.target_cell_size is not None and args.target_cell_size <= 0:
         parser.error("--target-cell-size must be positive.")
     return args
@@ -782,30 +795,15 @@ def input_groups(args):
     return grouped
 
 
-def main(kind="cpm", argv=None, clip=False):
-    args = parse_args(kind, argv)
-    windows = select_windows(args, kind)
-    if clip and not (args.boundary or args.boundary_dir):
-        raise ValueError("Regional clipping requires --boundary or --boundary-dir.")
-    if not args.inspect and not clip and not args.prepare_only:
-        for label in ("jython_exe", "template_dss"):
-            if not getattr(args, label) or not Path(getattr(args, label)).is_file():
-                raise ValueError(f"Set --{label.replace('_', '-')} or use --prepare-only.")
+def main(argv=None):
+    """Run the same configuration-driven workflow from the CLI or a notebook."""
+    args = parse_args(argv)
+    windows = select_windows(args)
     jobs, summaries = [], []
     for group, paths in input_groups(args).items():
-        catalog = Catalog(paths, args, kind)
+        catalog = Catalog(paths, args)
         try:
             keys = sorted(catalog.records)
-            if clip and not (args.start or args.window or args.windows):
-                first, last = keys[0], keys[-1]
-                start = pd.Timestamp(*first)
-                if catalog.calendar == "360_day":
-                    start = pd.Timestamp(first[0], first[1], 1)
-                    last_day = calendar.monthrange(last[0], last[1])[1]
-                    stop = pd.Timestamp(last[0], last[1], last_day) + pd.Timedelta(days=1)
-                else:
-                    stop = pd.Timestamp(*last) + pd.Timedelta(seconds=catalog.step)
-                windows = [Window("all", start, stop)]
             print(json.dumps(dict(dataset=group, files=len(paths), records=len(keys),
                                   first=keys[0], last=keys[-1], calendar=catalog.calendar,
                                   interval_seconds=catalog.step, units=catalog.units,
@@ -830,14 +828,14 @@ def main(kind="cpm", argv=None, clip=False):
                     for window in windows:
                         meta = prepare(catalog, plan, window, args, name, boundary)
                         jobs.append(meta)
-                        if clip:
+                        if args.output_format == "netcdf":
                             summaries.append(payload_to_netcdf(meta, args, name, window))
                 finally:
                     plan.close()
         finally:
             catalog.close()
     if not args.inspect:
-        if not clip:
+        if args.output_format == "dss":
             run_writer(jobs, args)
         Path(args.output_dir, "preparation_summary.json").write_text(
             json.dumps(dict(metadata=[str(p) for p in jobs], netcdf=summaries), indent=2), encoding="utf-8")
@@ -848,7 +846,7 @@ def main(kind="cpm", argv=None, clip=False):
 def payload_to_netcdf(meta_path, args, name, window):
     """Export the SAME prepared Gregorian intervals as CF NetCDF, retaining CRS/bounds.
 
-    Stage 1 converts 360_day once. Stage 2 detects Gregorian and does not remap again.
+    Converted Gregorian output can be reused without remapping the calendar again.
     Native rotated grids are reprojected using the explicitly requested output grid.
     """
     meta = json.loads(meta_path.read_text(encoding="ascii"))
@@ -871,7 +869,7 @@ def payload_to_netcdf(meta_path, args, name, window):
                    "projection_x_coordinate": meta["cell_zero_x"]+(np.arange(meta["nx"])+.5)*meta["cell_size"],
                    "projection_y_coordinate": meta["cell_zero_y"]+(np.arange(meta["ny"])+.5)*meta["cell_size"]},
             attrs={"Conventions": "CF-1.8", "source_calendar": meta["source_calendar"],
-                   "calendar_conversion": meta["calendar_conversion"], "history": "Prepared by dss_pipeline.py"})
+                   "calendar_conversion": meta["calendar_conversion"], "history": "Prepared by ukcp18_cpm_to_hecras_dss.py"})
         ds.time.attrs["bounds"] = "time_bnds"
         for axis in ("x", "y"):
             ds[f"projection_{axis}_coordinate"].attrs.update(standard_name=f"projection_{axis}_coordinate", units="m", axis=axis.upper())
@@ -883,3 +881,7 @@ def payload_to_netcdf(meta_path, args, name, window):
     finally:
         values._mmap.close()
     return str(output)
+
+
+if __name__ == "__main__":
+    main()
