@@ -1,0 +1,28 @@
+{
+  "input_dir": "D:/climate/cpm",
+  "input_pattern": "pr*.nc",
+  "output_dir": "D:/output/cpm",
+  "variable": "pr",
+  "window": [
+    [
+      "01",
+      "2019-11-01",
+      "2039-12-31"
+    ],
+    [
+      "02",
+      "2039-11-01",
+      "2059-12-31"
+    ],
+    [
+      "03",
+      "2059-11-01",
+      "2080-11-30"
+    ]
+  ],
+  "prepare_only": true,
+  "buffer_cells": 1,
+  "chunk_records": 24,
+  "missing_data": "zero",
+  "resampling": "average"
+}
