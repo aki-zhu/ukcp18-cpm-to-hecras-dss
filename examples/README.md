@@ -14,7 +14,6 @@ stored as `MM`, `PER-CUM`, from 00:00 to 00:00 on the following day.
 The periods intentionally overlap. The `20y` filename label denotes the
 period grouping; the exact coverage is given in the table.
 
-These files illustrate the DSS output structure and can provide the
-precipitation grid template used by the converter. For another catchment,
+These files illustrate the DSS output structure. For another catchment,
 generate rainfall grids covering that catchment with its own input data
 and boundary.

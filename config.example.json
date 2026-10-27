@@ -7,8 +7,6 @@
   "boundary": "D:/boundaries/forth.shp",
   "choose_boundary": false,
   "name": "forth",
-  "jython_exe": "C:/HEC/HEC-DSSVue/Jython.exe",
-  "template_dss": "examples/output_dss/pr_forth_20y_01_20191101_20391231.dss",
   "window": [
     [
       "01",

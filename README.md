@@ -9,12 +9,12 @@ millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-o
 
 ## Requirements
 
-- Python 3.11 or newer and the packages in `requirements.txt`.
+- 64-bit Python 3.11-3.13 on Windows or Linux and the packages in `requirements.txt`.
 - UKCP18 CPM precipitation NetCDF files containing `pr` and spatial coordinates.
 - An optional polygon shapefile for regional clipping.
-- For DSS output: HEC-DSSVue 3.4.x with `Jython.exe` and a precipitation grid DSS template.
-  A [Forth example](examples/output_dss/pr_forth_20y_01_20191101_20391231.dss)
-  can be used as the template.
+
+DSS files are written directly with `pydsstools`. HEC-DSSVue is optional for
+viewing the results; conversion runs entirely in Python.
 
 ## Quick start
 
@@ -25,7 +25,7 @@ millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-o
    ```
 
 2. Save the following as `config.json` in that folder and replace the data,
-   output, boundary and HEC-DSSVue paths. This example selects daily 5 km
+   output and boundary paths. This example selects daily 5 km
    files from ensemble member `01`; adjust `input_pattern` for your files.
 
    ```json
@@ -35,8 +35,6 @@ millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-o
      "output_dir": "D:/hec-ras/precipitation",
      "boundary": "D:/boundaries/forth.shp",
      "name": "forth",
-     "jython_exe": "C:/HEC/HEC-DSSVue/Jython.exe",
-     "template_dss": "examples/output_dss/pr_forth_20y_01_20191101_20391231.dss",
      "window": [["event", "2020-02-03", "2020-02-07"]]
    }
    ```
@@ -69,7 +67,7 @@ and `RUN = True`. Keep `INSPECT_ONLY = True` to inspect, then set it to
 `False` to convert.
 
 DSS is the default output. Use `--output-format netcdf` for reusable Gregorian
-NetCDF rainfall without HEC-DSSVue, or `--prepare-only` for intermediate rainfall
+NetCDF rainfall, or `--prepare-only` for intermediate rainfall
 data without writing DSS.
 
 ## Boundary selection (optional)
@@ -173,7 +171,7 @@ and [DSS Viewer time-window documentation](https://www.hec.usace.army.mil/conflu
 |---|---|
 | `ukcp18_cpm_to_hecras_dss.py` | Shared converter and command-line entry point for DSS and NetCDF output. |
 | `ukcp18_cpm_to_hecras_dss.ipynb` | Notebook interface using the same converter and JSON configuration. |
-| `hec_dss_grid_writer_jython.py` | DSS reader/writer run by HEC-DSSVue's separate Jython runtime. |
+| `hec_dss_grid_writer.py` | Direct DSS-7 grid writing and readback with `pydsstools`. |
 | `config.example.json` | Paths, output format and three configurable periods. |
 | `examples/output_dss/` | Complete Forth DSS examples for all three periods. |
 

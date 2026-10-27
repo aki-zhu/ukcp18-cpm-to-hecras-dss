@@ -1,6 +1,6 @@
 """Convert UKCP18 CPM precipitation to gridded HEC-DSS or CF NetCDF.
 
-Python 3 prepares portable payloads; HEC-DSSVue's Jython writes/reads DSS.
+Python prepares portable payloads and writes/reads DSS with pydsstools.
 Source files are always opened read-only. All spatial arrays use increasing x/y.
 """
 from __future__ import annotations
@@ -15,7 +15,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
 import tempfile
 
@@ -670,7 +669,6 @@ def prepare(catalog, plan, window, args, name, boundary=None):
         raise ValueError("Payload record/byte count mismatch.")
     meta = dict(**grid_meta, values_bin=(payload / "values.bin").as_posix(),
                 dates_csv=(payload / "dates.csv").as_posix(), out_dss=destination.as_posix(),
-                template_dss=Path(args.template_dss).resolve().as_posix() if args.template_dss else "",
                 a_part="", b_part="", c_part="PRECIPITATION", f_part="",
                 data_units="MM", record_count=count, interval_seconds=catalog.step,
                 start=window.start.isoformat(), end_exclusive=window.stop.isoformat(),
@@ -690,26 +688,9 @@ def prepare(catalog, plan, window, args, name, boundary=None):
 def run_writer(meta_paths, args):
     if args.prepare_only:
         return
-    if not args.jython_exe or not args.template_dss:
-        raise ValueError("DSS writing requires --jython-exe and --template-dss; use --prepare-only to inspect payloads.")
-    for path in (args.jython_exe, args.template_dss):
-        if not Path(path).is_file():
-            raise FileNotFoundError(path)
-    script = Path(__file__).with_name("hec_dss_grid_writer_jython.py")
-    out = Path(args.output_dir).resolve()
-    manifest = out / "dss_jobs_manifest.json"
-    manifest.write_text(json.dumps(dict(meta_paths=[str(p) for p in meta_paths],
-                                        validation_csv=(out / "dss_validation.csv").as_posix()), indent=2), encoding="ascii")
-    with (out / "dss_write.log").open("w", encoding="utf-8") as log:
-        process = subprocess.Popen([str(Path(args.jython_exe).resolve()), "-here", str(script), str(manifest)],
-                                   cwd=str(Path(args.jython_exe).resolve().parent), stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, errors="replace")
-        for line in process.stdout:
-            print(line, end="", flush=True)
-            log.write(line)
-            log.flush()
-        if process.wait() != 0:
-            raise RuntimeError(f"HEC-DSS writer/readback validation failed; see {out / 'dss_write.log'}")
+    from hec_dss_grid_writer import write_one
+    for meta_path in meta_paths:
+        write_one(meta_path)
 
 
 def build_parser():
@@ -743,8 +724,6 @@ def build_parser():
     parser.add_argument("--interval-hours", type=float, help="Interval when bounds/sufficient times are absent")
     parser.add_argument("--chunk-records", type=int, default=24)
     parser.add_argument("--missing-data", choices=["zero", "error"], default="zero")
-    parser.add_argument("--jython-exe")
-    parser.add_argument("--template-dss")
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--inspect", action="store_true", help="Read metadata and print coverage/grid; write nothing")
     parser.add_argument("--overwrite", action="store_true")
@@ -764,7 +743,7 @@ def parse_args(argv=None):
             raise ValueError("Configuration must be a JSON object.")
         if set(config) - known:
             raise ValueError("Unknown configuration keys: " + str(set(config)-known))
-        for key in ("input_dir", "output_dir", "boundary_dir", "boundary", "jython_exe", "template_dss"):
+        for key in ("input_dir", "output_dir", "boundary_dir", "boundary"):
             if config.get(key):
                 path = Path(config[key])
                 config[key] = str(path if path.is_absolute() else config_path.parent / path)
@@ -820,10 +799,6 @@ def main(argv=None):
     """Run the same configuration-driven workflow from the CLI or a notebook."""
     args = parse_args(argv)
     windows = select_windows(args)
-    if not args.inspect and args.output_format == "dss" and not args.prepare_only:
-        for label in ("jython_exe", "template_dss"):
-            if not getattr(args, label) or not Path(getattr(args, label)).is_file():
-                raise ValueError(f"Set --{label.replace('_', '-')} or use --prepare-only.")
     jobs, summaries = [], []
     for group, paths in input_groups(args).items():
         catalog = Catalog(paths, args)
