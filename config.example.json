@@ -2,6 +2,7 @@
   "input_dir": "D:/climate/ukcp18-cpm",
   "input_pattern": "pr*.nc",
   "output_dir": "D:/hec-ras/precipitation",
+  "output_format": "dss",
   "variable": "pr",
   "boundary": "D:/boundaries/forth.shp",
   "choose_boundary": false,

@@ -12,7 +12,7 @@ millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-o
 - Python 3.11 or newer and the packages in `requirements.txt`.
 - UKCP18 CPM precipitation NetCDF files containing `pr` and spatial coordinates.
 - An optional polygon shapefile for regional clipping.
-- HEC-DSSVue 3.4.x with `Jython.exe` and a precipitation grid DSS template.
+- For DSS output: HEC-DSSVue 3.4.x with `Jython.exe` and a precipitation grid DSS template.
   A [Forth example](examples/output_dss/pr_forth_20y_01_20191101_20391231.dss)
   can be used as the template.
 
@@ -30,13 +30,18 @@ from the configuration file's location.
 Inspect the input metadata, then create the DSS files:
 
 ```bash
-python 02_ukcp18_cpm_to_hecras_dss.py --config config.example.json --inspect
-python 02_ukcp18_cpm_to_hecras_dss.py --config config.example.json
+python ukcp18_cpm_to_hecras_dss.py --config config.example.json --inspect
+python ukcp18_cpm_to_hecras_dss.py --config config.example.json
 ```
 
-The example configuration writes DSS files directly. Set `prepare_only` to
-`true` to generate intermediate rainfall data without running HEC-DSSVue.
+The Notebook uses the same JSON configuration and converter. Set `RUN = True`
+to inspect metadata, then `INSPECT_ONLY = False` to convert.
 Use a separate output folder for each dataset or ensemble member.
+
+DSS is the default output. Use `--output-format netcdf`, or set
+`"output_format": "netcdf"` in the JSON, to export reusable Gregorian NetCDF
+rainfall with the same time windows and optional clipping. This mode requires
+no HEC-DSSVue. For DSS preparation without running the writer, use `--prepare-only`.
 
 ## Boundary selection (optional)
 
@@ -45,37 +50,55 @@ The example uses the broad Forth region from the UK river-basin regions
 dataset. Replace it with a catchment or model-domain boundary as needed:
 
 ```bash
-python 02_ukcp18_cpm_to_hecras_dss.py --config config.example.json --boundary "D:/boundaries/my_catchment.shp" --name my_catchment
+python ukcp18_cpm_to_hecras_dss.py --config config.example.json --boundary "D:/boundaries/my_catchment.shp" --name my_catchment
 ```
 
 To browse for a shapefile, use `--choose-boundary`, or set `choose_boundary`
-to `true` in the JSON configuration or `True` in a notebook. This requires
+to `true` in the JSON configuration. This requires
 a local desktop with Tkinter. Keep the `.shp`, `.shx`, `.dbf` and `.prj`
 files together; boundary coordinates are transformed to the output grid CRS.
 
-For full-grid DSS output, set `boundary` to `null`, keep `choose_boundary`
-`false` and leave `boundary_dir` unset. The optional `01_` regional export
-requires a boundary.
+For full-grid output, set `boundary` to `null`, keep `choose_boundary`
+`false` and leave `boundary_dir` unset.
 
-## Time and grid settings
+## Time windows
 
-- Edit the `window` list to create separate files for multiple periods, or
+- Edit the `window` list to create separate files for multiple periods;
+  `--windows 01` selects one configured period. Alternatively,
   use `--start 2020-02-03 --end 2020-02-07` with a configuration that omits
   `window`. Date-only end values include the whole day; datetime end values
   are exclusive and must align with the input interval.
-- Regular projected square grids in metres retain their native resolution.
-  For native rotated or geographic grids, specify a target projection and
-  cell size, for example:
-
-  ```bash
-  python 02_ukcp18_cpm_to_hecras_dss.py --config config.example.json --target-crs EPSG:27700 --target-cell-size 2200
-  ```
-
 - Daily inputs remain daily and hourly inputs remain hourly. `360_day`
   conversion preserves monthly rainfall totals but changes event timing and
   intensities. Complete source months are required for this conversion.
+  Monthly or seasonal means cannot supply hourly or daily rainfall intervals.
 - Missing rainfall is set to zero by default. Use `--missing-data error`
   for strict handling. Regional averages without a spatial grid are unsupported.
+
+## Spatial resolution and grid handling
+
+Grid handling follows the spatial coordinates, coordinate units and CF CRS
+metadata. The target projection and cell size control any reprojection.
+
+| Input grid | Handling | Target settings |
+|---|---|---|
+| Regular projected 5 km grid, such as British National Grid | Retains its CRS and 5000 m cells by default. | No override needed. |
+| Regular projected 2.2 km grid | Retains its CRS and 2200 m cells by default. | No override needed. |
+| Native 2.2 km rotated grid | Reprojects to a regular projected grid. Regular axes use an affine transform; stretched axes use their actual cell-centre coordinates. | Set `target_crs` and `target_cell_size`, e.g. `EPSG:27700` and `2200`. Use `5000` for a 5 km output grid. |
+| Other regular projected square grids in metres | Infers cell spacing from the coordinates and retains the grid by default. | Override both settings to change the output grid. |
+| Geographic or other rotated grids | Require a projected output grid with square cells in metres. | Set `target_crs` and `target_cell_size` explicitly. |
+| Regional averages or curvilinear meshes without two 1-D spatial axes | Unsupported as gridded rainfall inputs. | Use a supported spatial grid. |
+
+For example, to reproject native CPM data to 2200 m British National Grid cells:
+
+```bash
+python ukcp18_cpm_to_hecras_dss.py --config config.example.json --target-crs EPSG:27700 --target-cell-size 2200
+```
+
+Resampling defaults to `average` at every resolution; `--resampling nearest` or
+`--resampling bilinear` selects another method. An output cell size sets the
+target grid spacing; it does not increase the detail in the source rainfall.
+If CRS metadata is absent, supply a verified `--source-crs`.
 
 ## Use the DSS rainfall in HEC-RAS
 
@@ -118,15 +141,15 @@ and [DSS Viewer time-window documentation](https://www.hec.usace.army.mil/conflu
 
 | File | Purpose |
 |---|---|
-| `02_ukcp18_cpm_to_hecras_dss.py` | Convert NetCDF rainfall directly to DSS, with optional regional clipping. |
-| `01_clip_ukcp18_cpm_regions.py` | Optionally export regional Gregorian NetCDF rainfall for reuse. |
-| `*.ipynb` | Notebook interfaces with editable configuration cells. |
-| `config.example.json` | Paths and three configurable output periods. |
+| `ukcp18_cpm_to_hecras_dss.py` | Shared converter and command-line entry point for DSS and NetCDF output. |
+| `ukcp18_cpm_to_hecras_dss.ipynb` | Notebook interface using the same converter and JSON configuration. |
+| `hec_dss_grid_writer_jython.py` | DSS reader/writer run by HEC-DSSVue's separate Jython runtime. |
+| `config.example.json` | Paths, output format and three configurable periods. |
 | `examples/output_dss/` | Complete Forth DSS examples for all three periods. |
 
-NetCDF output from the optional regional export contains interval rainfall
+NetCDF exports contain interval rainfall
 amounts in `mm`, a Gregorian time axis and CRS information. It can be used as
 input to the DSS conversion without repeating calendar conversion.
 
 See [examples](examples/README.md) for the complete output files, or run
-`python 02_ukcp18_cpm_to_hecras_dss.py --help` for all options.
+`python ukcp18_cpm_to_hecras_dss.py --help` for all options.
