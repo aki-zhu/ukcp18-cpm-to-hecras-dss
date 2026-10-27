@@ -18,30 +18,59 @@ millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-o
 
 ## Quick start
 
-```bash
-python -m pip install -r requirements.txt
+1. Open a terminal in the repository folder and install the dependencies:
+
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+2. Save the following as `config.json` in that folder and replace the data,
+   output, boundary and HEC-DSSVue paths. This example selects daily 5 km
+   files from ensemble member `01`; adjust `input_pattern` for your files.
+
+   ```json
+   {
+     "input_dir": "D:/climate/ukcp18-cpm",
+     "input_pattern": "pr_rcp85_land-cpm_uk_5km_01_day_*.nc",
+     "output_dir": "D:/hec-ras/precipitation",
+     "boundary": "D:/boundaries/forth.shp",
+     "name": "forth",
+     "jython_exe": "C:/HEC/HEC-DSSVue/Jython.exe",
+     "template_dss": "examples/output_dss/pr_forth_20y_01_20191101_20391231.dss",
+     "window": [["event", "2020-02-03", "2020-02-07"]]
+   }
+   ```
+
+   Use one dataset and ensemble member per run. Relative paths are resolved
+   from the configuration file's location. For native rotated grids, add the
+   target settings in the resolution table below.
+
+3. Inspect the input, then run the conversion:
+
+   ```bash
+   python ukcp18_cpm_to_hecras_dss.py --config config.json --inspect
+   python ukcp18_cpm_to_hecras_dss.py --config config.json
+   ```
+
+   The first command prints metadata. The second writes one `.dss` file per
+   time window to `output_dir`. Use a separate output folder for each dataset
+   or ensemble member.
+
+To run the same conversion from Python:
+
+```python
+from ukcp18_cpm_to_hecras_dss import main
+
+main(["--config", "config.json"])
 ```
 
-Edit `config.example.json`: set the input, output and `jython_exe` paths,
-choose the time windows and configure the optional boundary below. Use one ensemble member
-per run; `input_pattern` selects the input files. Relative paths are resolved
-from the configuration file's location.
+In the supplied Notebook, set `CONFIG_PATH = Path("config.json").resolve()`
+and `RUN = True`. Keep `INSPECT_ONLY = True` to inspect, then set it to
+`False` to convert.
 
-Inspect the input metadata, then create the DSS files:
-
-```bash
-python ukcp18_cpm_to_hecras_dss.py --config config.example.json --inspect
-python ukcp18_cpm_to_hecras_dss.py --config config.example.json
-```
-
-The Notebook uses the same JSON configuration and converter. Set `RUN = True`
-to inspect metadata, then `INSPECT_ONLY = False` to convert.
-Use a separate output folder for each dataset or ensemble member.
-
-DSS is the default output. Use `--output-format netcdf`, or set
-`"output_format": "netcdf"` in the JSON, to export reusable Gregorian NetCDF
-rainfall with the same time windows and optional clipping. This mode requires
-no HEC-DSSVue. For DSS preparation without running the writer, use `--prepare-only`.
+DSS is the default output. Use `--output-format netcdf` for reusable Gregorian
+NetCDF rainfall without HEC-DSSVue, or `--prepare-only` for intermediate rainfall
+data without writing DSS.
 
 ## Boundary selection (optional)
 
@@ -50,7 +79,7 @@ The example uses the broad Forth region from the UK river-basin regions
 dataset. Replace it with a catchment or model-domain boundary as needed:
 
 ```bash
-python ukcp18_cpm_to_hecras_dss.py --config config.example.json --boundary "D:/boundaries/my_catchment.shp" --name my_catchment
+python ukcp18_cpm_to_hecras_dss.py --config config.json --boundary "D:/boundaries/my_catchment.shp" --name my_catchment
 ```
 
 To browse for a shapefile, use `--choose-boundary`, or set `choose_boundary`
@@ -63,17 +92,17 @@ For full-grid output, set `boundary` to `null`, keep `choose_boundary`
 
 ## Time windows
 
-- Edit the `window` list to create separate files for multiple periods;
-  `--windows 01` selects one configured period. Alternatively,
-  use `--start 2020-02-03 --end 2020-02-07` with a configuration that omits
-  `window`. Date-only end values include the whole day; datetime end values
-  are exclusive and must align with the input interval.
-- Daily inputs remain daily and hourly inputs remain hourly. `360_day`
-  conversion preserves monthly rainfall totals but changes event timing and
-  intensities. Complete source months are required for this conversion.
-  Monthly or seasonal means cannot supply hourly or daily rainfall intervals.
-- Missing rainfall is set to zero by default. Use `--missing-data error`
-  for strict handling. Regional averages without a spatial grid are unsupported.
+Each `window` entry is `[ID, START, END]`. Add entries for separate output files,
+or use `--windows ID` to select one. To replace the configured periods for one run:
+
+```bash
+python ukcp18_cpm_to_hecras_dss.py --config config.json --window event 2020-02-03 2020-02-07
+```
+
+Date-only ends include the whole day; datetime ends are exclusive and must align
+with the input interval. Daily and hourly inputs retain their interval.
+`360_day` conversion needs complete source months and preserves monthly totals
+while changing event timing and intensities. Monthly and seasonal means are unsupported.
 
 ## Spatial resolution and grid handling
 
@@ -92,13 +121,14 @@ metadata. The target projection and cell size control any reprojection.
 For example, to reproject native CPM data to 2200 m British National Grid cells:
 
 ```bash
-python ukcp18_cpm_to_hecras_dss.py --config config.example.json --target-crs EPSG:27700 --target-cell-size 2200
+python ukcp18_cpm_to_hecras_dss.py --config config.json --target-crs EPSG:27700 --target-cell-size 2200
 ```
 
 Resampling defaults to `average` at every resolution; `--resampling nearest` or
 `--resampling bilinear` selects another method. An output cell size sets the
 target grid spacing; it does not increase the detail in the source rainfall.
 If CRS metadata is absent, supply a verified `--source-crs`.
+Missing rainfall is zero by default; use `--missing-data error` for strict handling.
 
 ## Use the DSS rainfall in HEC-RAS
 
