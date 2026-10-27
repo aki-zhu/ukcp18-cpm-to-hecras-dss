@@ -852,7 +852,8 @@ def payload_to_netcdf(meta_path, args, name, window):
     Native rotated grids are reprojected using the explicitly requested output grid.
     """
     meta = json.loads(meta_path.read_text(encoding="ascii"))
-    rows = list(csv.DictReader(Path(meta["dates_csv"]).open(encoding="ascii")))
+    with Path(meta["dates_csv"]).open(encoding="ascii") as handle:
+        rows = list(csv.DictReader(handle))
     dates = pd.DatetimeIndex([row["start"] for row in rows])
     ends = pd.DatetimeIndex([row["end"] for row in rows])
     values = np.memmap(meta["values_bin"], dtype="<f4", mode="r", shape=(len(rows), meta["ny"], meta["nx"]))

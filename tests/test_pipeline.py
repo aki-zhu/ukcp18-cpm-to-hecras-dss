@@ -224,7 +224,8 @@ class PipelineTests(unittest.TestCase):
         meta=json.loads(jobs[0].read_text())
         data=np.fromfile(meta["values_bin"],dtype="<f4").reshape(3,4,3)
         np.testing.assert_equal(data[0],np.arange(12).reshape(4,3)+1)
-        rows=list(csv.DictReader(open(meta["dates_csv"])))
+        with open(meta["dates_csv"],encoding="ascii") as handle:
+            rows=list(csv.DictReader(handle))
         self.assertEqual(rows[-1]["end"],"2020-01-02T04:00:00")
         self.assertEqual(float(rows[0]["mean"]),6.5)
         args=self.args()
@@ -244,7 +245,7 @@ class PipelineTests(unittest.TestCase):
         config=self.root/"settings.json"
         config.write_text(json.dumps(dict(input_dir="source",output_dir="output",chunk_records=2)))
         args=parse_args("cpm",["--config",str(config),"--chunk-records","5"])
-        self.assertEqual(Path(args.input_dir),self.source)
+        self.assertTrue(Path(args.input_dir).samefile(self.source))
         self.assertEqual(args.chunk_records,5)
 
     def test_stretched_grid_geolocation_has_correct_pixel_centres(self):
