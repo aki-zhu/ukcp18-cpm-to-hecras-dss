@@ -3,15 +3,15 @@
 Convert UKCP18 Convection-Permitting Model (CPM) precipitation NetCDF files
 into gridded HEC-DSS rainfall inputs for HEC-RAS rain-on-grid models.
 
-The workflow selects a region and time period, handles grid coordinates,
-rainfall units and the `360_day` calendar, and writes precipitation in
+The workflow selects a time period, optionally clips to a polygon boundary,
+handles grid coordinates, rainfall units and the `360_day` calendar, and writes precipitation in
 millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-only.
 
 ## Requirements
 
 - Python 3.11 or newer and the packages in `requirements.txt`.
 - UKCP18 CPM precipitation NetCDF files containing `pr` and spatial coordinates.
-- A polygon boundary for regional output.
+- An optional polygon shapefile for regional clipping.
 - HEC-DSSVue 3.4.x with `Jython.exe` and a precipitation grid DSS template.
   A [Forth example](examples/output_dss/pr_forth_20y_01_20191101_20391231.dss)
   can be used as the template.
@@ -22,8 +22,8 @@ millimetres per accumulation interval (`MM`, `PER-CUM`). Source files are read-o
 python -m pip install -r requirements.txt
 ```
 
-Edit `config.example.json`: set the input folder, output folder, boundary
-and `jython_exe` paths, then choose the time windows. Use one ensemble member
+Edit `config.example.json`: set the input, output and `jython_exe` paths,
+choose the time windows and configure the optional boundary below. Use one ensemble member
 per run; `input_pattern` selects the input files. Relative paths are resolved
 from the configuration file's location.
 
@@ -37,6 +37,25 @@ python 02_ukcp18_cpm_to_hecras_dss.py --config config.example.json
 The example configuration writes DSS files directly. Set `prepare_only` to
 `true` to generate intermediate rainfall data without running HEC-DSSVue.
 Use a separate output folder for each dataset or ensemble member.
+
+## Boundary selection (optional)
+
+Set `boundary` to any polygon shapefile and `name` to the output label.
+The example uses the broad Forth region from the UK river-basin regions
+dataset. Replace it with a catchment or model-domain boundary as needed:
+
+```bash
+python 02_ukcp18_cpm_to_hecras_dss.py --config config.example.json --boundary "D:/boundaries/my_catchment.shp" --name my_catchment
+```
+
+To browse for a shapefile, use `--choose-boundary`, or set `choose_boundary`
+to `true` in the JSON configuration or `True` in a notebook. This requires
+a local desktop with Tkinter. Keep the `.shp`, `.shx`, `.dbf` and `.prj`
+files together; boundary coordinates are transformed to the output grid CRS.
+
+For full-grid DSS output, set `boundary` to `null`, keep `choose_boundary`
+`false` and leave `boundary_dir` unset. The optional `01_` regional export
+requires a boundary.
 
 ## Time and grid settings
 

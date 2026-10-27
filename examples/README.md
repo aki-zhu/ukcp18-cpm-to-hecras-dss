@@ -1,7 +1,8 @@
 # Forth DSS rainfall examples
 
-Complete daily precipitation grids for the Forth region, using 5000 m cells
-on a 35 by 17 grid in OSGB36 / British National Grid. Rainfall amounts are
+Complete daily precipitation grids for the broad Forth region in the UK
+river-basin regions dataset, using 5000 m cells on a 35 by 17 grid in
+OSGB36 / British National Grid. Rainfall amounts are
 stored as `MM`, `PER-CUM`, from 00:00 to 00:00 on the following day.
 
 | DSS file | Inclusive daily dates | Size |

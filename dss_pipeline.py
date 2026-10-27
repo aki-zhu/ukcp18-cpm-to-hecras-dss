@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 import numpy as np
@@ -409,6 +410,36 @@ def dilate_mask(mask, cells):
     return result
 
 
+def choose_boundary_shapefile(initial_path=None):
+    """Choose a local polygon shapefile without making desktop support mandatory."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as error:
+        raise RuntimeError("The file chooser needs Tkinter. Set --boundary to a shapefile path instead.") from error
+    initial = Path(initial_path).expanduser() if initial_path else Path.cwd()
+    directory = initial if initial.is_dir() else initial.parent
+    options = dict(title="Select a clipping boundary shapefile", filetypes=[("Shapefiles", "*.shp")])
+    if directory.is_dir():
+        options["initialdir"] = str(directory.resolve())
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        selected = filedialog.askopenfilename(parent=root, **options)
+    except tk.TclError as error:
+        raise RuntimeError("The file chooser needs a desktop session. Set --boundary to a shapefile path instead.") from error
+    finally:
+        if root is not None:
+            root.destroy()
+    if not selected:
+        return None
+    path = Path(selected).expanduser().resolve()
+    if path.suffix.lower() != ".shp" or not path.is_file():
+        raise ValueError("Select an existing .shp boundary file.")
+    return str(path)
+
+
 def load_polygons(path, crs, boundary_crs=None):
     import geopandas as gpd
     gdf = gpd.read_file(path)
@@ -710,8 +741,9 @@ def build_parser(kind):
     parser.add_argument("--window", action="append", nargs=3, metavar=("ID", "START", "END"))
     parser.add_argument("--windows", nargs="+", help="Select IDs from configured/default windows")
     parser.add_argument("--regions", nargs="+", help="Region slugs; defaults to all with --boundary-dir")
-    parser.add_argument("--boundary-dir")
-    parser.add_argument("--boundary", help="One polygon file instead of the 17-region boundary directory")
+    parser.add_argument("--boundary-dir", help="Directory of named regional boundary folders")
+    parser.add_argument("--boundary", help="Polygon shapefile path for optional regional clipping")
+    parser.add_argument("--choose-boundary", action="store_true", help="Browse for a shapefile; overrides configured boundary paths")
     parser.add_argument("--boundary-crs", help="Only needed for boundary files with missing CRS")
     parser.add_argument("--name", default=kind, help="Dataset/region name for a single ungrouped input")
     parser.add_argument("--buffer-cells", type=int, default=1)
@@ -735,6 +767,8 @@ def build_parser(kind):
 
 def parse_args(kind, argv=None):
     parser = build_parser(kind)
+    explicit = list(argv) if argv is not None else sys.argv[1:]
+    explicit_flags = {value.split("=", 1)[0] for value in explicit if value.startswith("--")}
     preliminary, _ = parser.parse_known_args(argv)
     if preliminary.config:
         config_path = Path(preliminary.config).resolve()
@@ -746,19 +780,29 @@ def parse_args(kind, argv=None):
             if config.get(key):
                 path = Path(config[key])
                 config[key] = str(path if path.is_absolute() else config_path.parent / path)
-        import sys
-        explicit = list(argv) if argv is not None else sys.argv[1:]
         for key in ("window", "select"):
-            if "--" + key in explicit:
+            if "--" + key in explicit_flags:
                 config.pop(key, None)
+        for flag, other in (("--boundary", "boundary_dir"), ("--boundary-dir", "boundary")):
+            if flag in explicit_flags:
+                config.pop(other, None)
+                if "--choose-boundary" not in explicit_flags:
+                    config["choose_boundary"] = False
         parser.set_defaults(**config)
     args = parser.parse_args(argv)
     if not args.input_dir or (not args.output_dir and not args.inspect):
         parser.error("--input-dir and --output-dir are required (output is optional with --inspect).")
     if args.chunk_records < 1 or args.buffer_cells < 0:
         parser.error("chunk-records must be positive and buffer-cells must be non-negative.")
+    if args.choose_boundary:
+        selected = choose_boundary_shapefile(args.boundary or args.boundary_dir)
+        if selected is None:
+            parser.error("Boundary selection cancelled; no conversion was started.")
+        args.boundary, args.boundary_dir = selected, None
     if args.boundary and args.boundary_dir:
         parser.error("Use either --boundary or --boundary-dir.")
+    if args.boundary and not args.inspect and not Path(args.boundary).is_file():
+        parser.error("Boundary shapefile not found: " + str(args.boundary))
     if args.target_cell_size is not None and args.target_cell_size <= 0:
         parser.error("--target-cell-size must be positive.")
     return args
