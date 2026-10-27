@@ -58,6 +58,43 @@ Use a separate output folder for each dataset or ensemble member.
 - Missing rainfall is set to zero by default. Use `--missing-data error`
   for strict handling. Regional averages without a spatial grid are unsupported.
 
+## Use the DSS rainfall in HEC-RAS
+
+After conversion, the DSS file contains a time series of precipitation grids
+that can be assigned to a HEC-RAS rain-on-grid model.
+
+1. Open **Unsteady Flow Analysis**, select the intended **Plan**, and set its
+   **Simulation Time Window** to the required start and end dates and times.
+2. Open **Unsteady Flow Data** and select **Meteorological Data**. Set
+   **Precipitation/Evapotranspiration** to **Enable** if needed. Under
+   **Precipitation**, select **Gridded** as the **Mode** and **DSS** as the
+   **Source**.
+3. In **DSS Data**, use the open-file button to select the converted `.dss`
+   file. In the **DSS Viewer**, double-click the first timestep of the intended
+   **PRECIPITATION** grid series.
+4. Set **Time Window** to **Plan Time**. If an **Apply** button is shown,
+   apply the time-window setting, then confirm the selection with **OK**.
+   This displays the data for the active Plan's time window. The selected
+   record identifies the rainfall grid series used by the model.
+5. Save the unsteady flow data and ensure that the active Plan uses this
+   unsteady flow file. During computation, HEC-RAS reads the rainfall grids
+   corresponding to the Plan's simulation period.
+6. In **RAS Mapper**, display precipitation under **Event Conditions** to
+   inspect its location, coverage and variation over time. Incremental and
+   accumulated precipitation maps are available.
+7. Return to **Unsteady Flow Analysis**, save the Plan and click **Compute**
+   to run the model.
+
+**Time coverage:** The DSS accumulation intervals must continuously cover the
+entire Plan simulation window. The first interval must start at or before the
+Plan start, and the final interval must end at or after the Plan end. Choose a
+DSS output period that includes the complete simulation; **Plan Time** does
+not extend the rainfall data available in the file.
+
+See the official [Meteorological Data tutorial](https://www.hec.usace.army.mil/confluence/rasdocs/hgt/latest/tutorials/2d-unsteady-flow/meteorological-data),
+[gridded precipitation guidance](https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/6.6/boundary-and-initial-conditions-for-2d-flow-areas/global-boundary-conditions)
+and [DSS Viewer time-window documentation](https://www.hec.usace.army.mil/confluence/rasdocs/rasum/7.0/viewing-results/viewing-data-contained-in-an-hec-dss-file).
+
 ## Files
 
 | File | Purpose |
