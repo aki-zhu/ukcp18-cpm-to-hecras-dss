@@ -1,8 +1,12 @@
 {
-  "input_dir": "D:/climate/cpm",
+  "input_dir": "D:/climate/ukcp18-cpm",
   "input_pattern": "pr*.nc",
-  "output_dir": "D:/output/cpm",
+  "output_dir": "D:/hec-ras/precipitation",
   "variable": "pr",
+  "boundary": "D:/boundaries/forth.shp",
+  "name": "forth",
+  "jython_exe": "C:/HEC/HEC-DSSVue/Jython.exe",
+  "template_dss": "examples/output_dss/pr_forth_20y_01_20191101_20391231.dss",
   "window": [
     [
       "01",
@@ -20,9 +24,5 @@
       "2080-11-30"
     ]
   ],
-  "prepare_only": true,
-  "buffer_cells": 1,
-  "chunk_records": 24,
-  "missing_data": "zero",
-  "resampling": "average"
+  "prepare_only": false
 }

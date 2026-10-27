@@ -1,22 +1,19 @@
-# Complete Forth DSS output examples
+# Forth DSS rainfall examples
 
-These are full original files, copied without truncation or recalculation from
-the user-supplied local output directories. They illustrate the established
-5 km MM / PER-CUM workflow. They are not outputs of the new implementation.
-Only DSS files are stored in `output_dss/`; supporting notes stay here.
+Complete daily precipitation grids for the Forth region, using 5000 m cells
+on a 35 by 17 grid in OSGB36 / British National Grid. Rainfall amounts are
+stored as `MM`, `PER-CUM`, from 00:00 to 00:00 on the following day.
 
-The windows intentionally overlap. Their precise inclusive dates are shown
-below; "20y" is the original naming convention (the last CPM window is longer).
-All five supplied Forth examples use 35 x 17 cells with 5000 m cell size.
-Daily catalog counts: CPM 01=7366, 02=7366, 03=7701; HadUK 01=7366, 02=7366.
-The first and last pathnames and headers were read with HEC-DSSVue 3.4.15.
-
-| File | Inclusive daily dates | Bytes |
+| DSS file | Inclusive daily dates | Size |
 |---|---|---:|
-| [pr_forth_20y_01_20191101_20391231.dss](output_dss/pr_forth_20y_01_20191101_20391231.dss) | 20191101–20391231 | 22,298,456 |
-| [pr_forth_20y_02_20391101_20591231.dss](output_dss/pr_forth_20y_02_20391101_20591231.dss) | 20391101–20591231 | 22,304,512 |
-| [pr_forth_20y_03_20591101_20801130.dss](output_dss/pr_forth_20y_03_20591101_20801130.dss) | 20591101–20801130 | 23,332,584 |
+| [Period 01](output_dss/pr_forth_20y_01_20191101_20391231.dss) | 2019-11-01 to 2039-12-31 | 22.3 MB |
+| [Period 02](output_dss/pr_forth_20y_02_20391101_20591231.dss) | 2039-11-01 to 2059-12-31 | 22.3 MB |
+| [Period 03](output_dss/pr_forth_20y_03_20591101_20801130.dss) | 2059-11-01 to 2080-11-30 | 23.3 MB |
 
-SHA-256 checksums are recorded in `checksums.json` and compared with the
-local originals. Raw climate inputs, model files, logs and payloads are excluded.
-One of these files can be used as a precipitation GridContainer template.
+The periods intentionally overlap. The `20y` filename label denotes the
+period grouping; the exact coverage is given in the table.
+
+These files illustrate the DSS output structure and can provide the
+precipitation grid template used by the converter. For another catchment,
+generate rainfall grids covering that catchment with its own input data
+and boundary.
